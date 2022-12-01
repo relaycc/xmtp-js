@@ -1,6 +1,6 @@
 {
-  "name": "@xmtp/xmtp-js",
-  "version": "0.0.0-development",
+  "name": "@relaycc/xmtp-js",
+  "version": "0.1.5",
   "description": "XMTP client SDK for interacting with XMTP networks.",
   "main": "dist/cjs/src/index.js",
   "module": "dist/esm/src/index.js",
@@ -18,6 +18,8 @@
     "clean": "node tools/cleanup && npm run clean:proto",
     "clean:proto": "rm -rf src/proto/*.ts",
     "package": "npm pack",
+    "patch": "npm version patch -m 'patch: Bump version to %s'",
+    "pub": "rm -rf dist/ && npm run build && npm publish",
     "prepublish": "npm run build",
     "test": "npm run test:node",
     "test:node": "jest --no-cache --env='node' --forceExit --testTimeout=30000",
