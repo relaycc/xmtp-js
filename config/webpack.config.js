@@ -28,6 +28,7 @@ module.exports = {
   resolve: {
     extensions: ['.ts', '.js', '.tsx', '.jsx'],
     fallback: {
+      buffer: require.resolve('buffer/'),
       assert: false,
       crypto: false,
       stream: false,
@@ -37,4 +38,9 @@ module.exports = {
       util: false,
     },
   },
+  plugins: [
+    new webpack.ProvidePlugin({
+      Buffer: ['buffer', 'Buffer'],
+    }),
+  ],
 }

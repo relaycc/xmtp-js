@@ -8,6 +8,7 @@
   "browser": "dist/umd/index.js",
   "types": "dist/types/src/index.d.ts",
   "scripts": {
+    "dev": "node tools/cleanup cjs && tsc -p config/tsconfig.cjs.json --watch",
     "build": "npm run build:cjs && npm run build:esm && npm run build:umd && npm run build:types",
     "build:cjs": "node tools/cleanup cjs && tsc -p config/tsconfig.cjs.json",
     "build:esm": "node tools/cleanup esm && tsc -p config/tsconfig.esm.json",
@@ -65,6 +66,7 @@
     "@noble/secp256k1": "^1.5.2",
     "@stardazed/streams-polyfill": "^2.4.0",
     "@xmtp/proto": "^3.4.0",
+    "buffer": "^6.0.3",
     "ethers": "^5.5.3",
     "long": "^5.2.0"
   },
