@@ -1,7 +1,6 @@
 import { NotifyStreamEntityArrival } from '@xmtp/proto/ts/dist/types/fetch.pb'
-import ApiClient, { PublishParams } from '../src/ApiClient'
+import ApiClient, { GrpcStatus, PublishParams } from '../src/ApiClient'
 import { messageApi } from '@xmtp/proto'
-import Long from 'long'
 import { sleep } from './helpers'
 import { Authenticator } from '../src/authn'
 import { PrivateKey } from '../src'
@@ -188,7 +187,7 @@ describe('Publish', () => {
         message: Uint8Array.from([]),
       },
     ])
-    expect(promise).rejects.toBeInstanceOf(Error)
+    expect(promise).rejects.toThrow('Content topic cannot be empty string')
   })
 })
 
@@ -226,7 +225,7 @@ describe('Publish authn', () => {
     }
 
     const prom = publishClient.publish([msg])
-    expect(prom).rejects.toEqual({ code: 16 })
+    expect(prom).rejects.toEqual({ code: GrpcStatus.UNAUTHENTICATED })
     expect(publishMock).toHaveBeenCalledTimes(2)
   })
 })
@@ -243,7 +242,7 @@ describe('Subscribe', () => {
       numEnvelopes++
     }
     const req = { contentTopics: [CONTENT_TOPIC] }
-    client.subscribe(req, cb)
+    const unsubscribeFn = client.subscribe(req, cb)
     await sleep(10)
     expect(numEnvelopes).toBe(2)
     expect(subscribeMock).toBeCalledWith(req, cb, {
@@ -254,6 +253,85 @@ describe('Subscribe', () => {
         'X-Client-Version': 'xmtp-js/' + version,
       }),
     })
+    await unsubscribeFn()
+  })
+
+  it('should resubscribe on error', async () => {
+    let called = 0
+    const subscribeMock = jest
+      .spyOn(MessageApi, 'Subscribe')
+      .mockImplementation(
+        async (
+          req: messageApi.SubscribeRequest,
+          cb: NotifyStreamEntityArrival<messageApi.Envelope> | undefined
+        ): Promise<void> => {
+          called++
+          if (called == 1) {
+            throw new Error('error')
+          }
+          for (let i = 0; i < 2; i++) {
+            if (cb) {
+              cb(createEnvelope())
+            }
+          }
+        }
+      )
+    let numEnvelopes = 0
+    const cb = (env: messageApi.Envelope) => {
+      numEnvelopes++
+    }
+    const req = { contentTopics: [CONTENT_TOPIC] }
+    const unsubscribeFn = client.subscribe(req, cb)
+    await sleep(1200)
+    expect(numEnvelopes).toBe(2)
+    expect(subscribeMock).toBeCalledWith(req, cb, {
+      pathPrefix: PATH_PREFIX,
+      signal: expect.anything(),
+      mode: 'cors',
+      headers: new Headers({
+        'X-Client-Version': 'xmtp-js/' + version,
+      }),
+    })
+    await unsubscribeFn()
+  })
+
+  it('should resubscribe on completion', async () => {
+    let called = 0
+    const subscribeMock = jest
+      .spyOn(MessageApi, 'Subscribe')
+      .mockImplementation(
+        async (
+          req: messageApi.SubscribeRequest,
+          cb: NotifyStreamEntityArrival<messageApi.Envelope> | undefined
+        ): Promise<void> => {
+          called++
+          if (called == 1) {
+            return
+          }
+          for (let i = 0; i < 2; i++) {
+            if (cb) {
+              cb(createEnvelope())
+            }
+          }
+        }
+      )
+    let numEnvelopes = 0
+    const cb = (env: messageApi.Envelope) => {
+      numEnvelopes++
+    }
+    const req = { contentTopics: [CONTENT_TOPIC] }
+    const unsubscribeFn = client.subscribe(req, cb)
+    await sleep(1200)
+    expect(numEnvelopes).toBe(2)
+    expect(subscribeMock).toBeCalledWith(req, cb, {
+      pathPrefix: PATH_PREFIX,
+      signal: expect.anything(),
+      mode: 'cors',
+      headers: new Headers({
+        'X-Client-Version': 'xmtp-js/' + version,
+      }),
+    })
+    await unsubscribeFn()
   })
 
   it('throws when no content topics returned', async () => {

@@ -3,6 +3,7 @@ import {
   SignedPublicKeyBundle,
   PrivateKeyBundleV1,
   PrivateKeyBundleV2,
+  Signature,
 } from './crypto'
 import {
   buildUserContactTopic,
@@ -10,7 +11,8 @@ import {
   EnvelopeMapper,
   buildUserInviteTopic,
 } from './utils'
-import { Signer } from 'ethers'
+import { utils } from 'ethers'
+import { Signer } from './types/Signer'
 import {
   EncryptedKeyStore,
   KeyStore,
@@ -21,12 +23,12 @@ import { Conversations } from './conversations'
 import { ContentTypeText, TextCodec } from './codecs/Text'
 import { ContentTypeId, ContentCodec } from './MessageContent'
 import { compress } from './Compression'
-import { xmtpEnvelope, messageApi, fetcher } from '@xmtp/proto'
+import { content as proto, messageApi, fetcher } from '@xmtp/proto'
 import { decodeContactBundle, encodeContactBundle } from './ContactBundle'
-import ApiClient, { PublishParams, SortDirection } from './ApiClient'
+import ApiClient, { ApiUrls, PublishParams, SortDirection } from './ApiClient'
 import { Authenticator } from './authn'
 import { SealedInvitation } from './Invitation'
-const { Compression } = xmtpEnvelope
+const { Compression } = proto
 const { b64Decode } = fetcher
 
 // eslint-disable @typescript-eslint/explicit-module-boundary-types
@@ -34,12 +36,6 @@ const { b64Decode } = fetcher
 
 // Default maximum allowed content size
 const MaxContentSize = 100 * 1024 * 1024 // 100M
-
-export const ApiUrls = {
-  local: 'http://localhost:5555',
-  dev: 'https://dev.xmtp.network',
-  production: 'https://production.xmtp.network',
-} as const
 
 // Parameters for the listMessages functions
 export type ListMessagesOptions = {
@@ -67,7 +63,7 @@ export { Compression }
 export type SendOptions = {
   contentType?: ContentTypeId
   contentFallback?: string
-  compression?: xmtpEnvelope.Compression
+  compression?: proto.Compression
   timestamp?: Date
 }
 
@@ -99,11 +95,18 @@ type KeyStoreOptions = {
   privateKeyOverride?: Uint8Array
 }
 
+type LegacyOptions = {
+  publishLegacyContact?: boolean
+}
+
 /**
  * Aggregate type for client options. Optional properties are used when the default value is calculated on invocation, and are computed
  * as needed by each function. All other defaults are specified in defaultOptions.
  */
-export type ClientOptions = NetworkOptions & KeyStoreOptions & ContentOptions
+export type ClientOptions = NetworkOptions &
+  KeyStoreOptions &
+  ContentOptions &
+  LegacyOptions
 
 /**
  * Provide a default client configuration. These settings can be used on their own, or as a starting point for custom configurations
@@ -197,12 +200,12 @@ export default class Client {
     return client.legacyKeys.encode()
   }
 
-  async init(options: ClientOptions): Promise<void> {
+  private async init(options: ClientOptions): Promise<void> {
     options.codecs.forEach((codec) => {
       this.registerCodec(codec)
     })
     this._maxContentSize = options.maxContentSize
-    await this.publishUserContact()
+    await this.ensureUserContactPublished(options.publishLegacyContact)
   }
 
   // gracefully shut down the client
@@ -210,10 +213,27 @@ export default class Client {
     return undefined
   }
 
-  // publish the key bundle into the contact topic
-  // WARNING: temporarily public to allow testing negotiated topics
-  // TODO: make private again asap
-  async publishUserContact(legacy = true): Promise<void> {
+  private async ensureUserContactPublished(legacy = false): Promise<void> {
+    const bundle = await getUserContactFromNetwork(this.apiClient, this.address)
+    if (
+      bundle &&
+      bundle instanceof SignedPublicKeyBundle &&
+      this.keys.getPublicKeyBundle().equals(bundle)
+    ) {
+      return
+    }
+    // TEMPORARY: publish V1 contact to make sure there is one in the topic
+    // in order to preserve compatibility with pre-v7 clients.
+    // Remove when pre-v7 clients are deprecated
+    this.publishUserContact(true)
+    if (!legacy) {
+      this.publishUserContact(legacy)
+    }
+  }
+
+  // PRIVATE: publish the key bundle into the contact topic
+  // left public for testing purposes
+  async publishUserContact(legacy = false): Promise<void> {
     const keys = legacy ? this.legacyKeys : this.keys
     await this.publishEnvelopes([
       {
@@ -226,13 +246,16 @@ export default class Client {
   /**
    * Returns the cached PublicKeyBundle if one is known for the given address or fetches
    * one from the network
+   *
+   * This throws if either the address is invalid or the contact is not published.
+   * See also [#canMessage].
    */
 
   async getUserContact(
     peerAddress: string
   ): Promise<PublicKeyBundle | SignedPublicKeyBundle | undefined> {
+    peerAddress = utils.getAddress(peerAddress) // EIP55 normalize the address case.
     const existingBundle = this.knownPublicKeyBundles.get(peerAddress)
-
     if (existingBundle) {
       return existingBundle
     }
@@ -249,7 +272,11 @@ export default class Client {
     return newBundle
   }
 
+  /**
+   * Used to force getUserContact fetch contact from the network.
+   */
   forgetContact(peerAddress: string) {
+    peerAddress = utils.getAddress(peerAddress) // EIP55 normalize the address case.
     this.knownPublicKeyBundles.delete(peerAddress)
   }
 
@@ -258,14 +285,24 @@ export default class Client {
    * found for the given address
    */
   public async canMessage(peerAddress: string): Promise<boolean> {
-    const keyBundle = await this.getUserContact(peerAddress)
-    return keyBundle !== undefined
+    try {
+      const keyBundle = await this.getUserContact(peerAddress)
+      return keyBundle !== undefined
+    } catch (e) {
+      // Instead of throwing, a bad address should just return false.
+      return false
+    }
   }
 
   static async canMessage(
     peerAddress: string,
     opts?: Partial<NetworkOptions>
   ): Promise<boolean> {
+    try {
+      peerAddress = utils.getAddress(peerAddress) // EIP55 normalize the address case.
+    } catch (e) {
+      return false
+    }
     const apiUrl = opts?.apiUrl || ApiUrls[opts?.env || 'dev']
     const keyBundle = await getUserContactFromNetwork(
       new ApiClient(apiUrl, { appVersion: opts?.appVersion }),
@@ -334,7 +371,7 @@ export default class Client {
       encoded.compression = options.compression
     }
     await compress(encoded)
-    return xmtpEnvelope.EncodedContent.encode(encoded).finish()
+    return proto.EncodedContent.encode(encoded).finish()
   }
 
   listInvitations(opts?: ListMessagesOptions): Promise<SealedInvitation[]> {
@@ -397,6 +434,10 @@ export default class Client {
       mapper
     )
   }
+
+  async signBytes(bytes: Uint8Array): Promise<Signature> {
+    return this.keys.identityKey.sign(bytes)
+  }
 }
 
 function createKeyStoreFromConfig(
@@ -457,7 +498,7 @@ async function loadOrCreateKeysFromOptions(
 ) {
   if (!options.privateKeyOverride && !wallet) {
     throw new Error(
-      'Must provide either an ethers.Signer or specify privateKeyOverride'
+      'Must provide either a Signer or specify privateKeyOverride'
     )
   }
 
