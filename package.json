@@ -1,6 +1,6 @@
 {
   "name": "@relaycc/xmtp-js",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "XMTP client SDK for interacting with XMTP networks.",
   "main": "dist/cjs/src/index.js",
   "module": "dist/esm/src/index.js",
