@@ -50,12 +50,14 @@ describe('Workbench', () => {
   })
 
   it('list conversations', async () => {
-    const wallet = new Wallet(
-      '0xa82c56d6b3132abdaecaebd65fac39c13d201975ec3e52d19dd505e9f5f34df9'
-    )
+    console.time('WORKBENCH :: TIMER :: LIST CONVERSATIONS')
+    const wallet = new Wallet(process.env.RELAYCC_TEST_PK as unknown as string)
+    console.time('WORKBENCH :: TIMER :: CREATE CLIENT')
     const client = await Client.create(wallet)
+    console.timeEnd('WORKBENCH :: TIMER :: CREATE CLIENT')
     const conversations = await client.conversations.list()
-    console.log(conversations.length)
+    console.timeEnd('WORKBENCH :: TIMER :: LIST CONVERSATIONS')
+    console.log(`WORKBENCH :: NUM CONVOS ${conversations.length}`)
   })
 
   it('export xmtp identity', async () => {
