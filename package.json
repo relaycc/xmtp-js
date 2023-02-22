@@ -1,6 +1,6 @@
 {
   "name": "@relaycc/xmtp-js",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "description": "The XMTP client SDK for interacting with XMTP networks, with minor additions and modifications from the Relay team.",
   "main": "dist/cjs/src/index.js",
   "module": "dist/esm/src/index.js",
@@ -22,6 +22,7 @@
     "patch": "npm version patch -m 'patch: Bump version to %s'",
     "pub": "rm -rf dist/ && npm run build && npm publish",
     "package": "npm pack",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "test:setup": "./dev/up",
     "test:teardown": "./dev/down",

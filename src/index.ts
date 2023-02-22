@@ -1,4 +1,12 @@
-export { Message, DecodedMessage, decodeContent } from './Message'
+export {
+  Message,
+  DecodedMessage,
+  DecodedMessageExport,
+  decodeContent,
+  MessageV1,
+  MessageV2,
+} from './Message'
+export * as message from './Message'
 export {
   PublicKey,
   PublicKeyBundle,
@@ -39,3 +47,15 @@ export {
   toNanoString,
   mapPaginatedStream,
 } from './utils'
+
+export {
+  decodeMessageV1,
+  decodeMessageV2,
+  encodeMessage,
+  encodeMessageV1,
+  encodeMessageV2,
+  ConversationExport,
+  ConversationV1Export,
+  ConversationV2Export,
+  EncoderFunType,
+} from './conversations/Conversation'

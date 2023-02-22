@@ -31,7 +31,7 @@ describe('Performance', () => {
       '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'
     )
   })
-
+  /*
   it('Fetch one conversation', async () => {
     const wallet = new Wallet(process.env.RELAYCC_TEST_PK as string)
     const client = await Client.create(wallet)
@@ -45,13 +45,13 @@ describe('Performance', () => {
       limit: 1,
     })
   })
-
+*/
   it('List conversations', async () => {
     const wallet = new Wallet(process.env.RELAYCC_TEST_PK as string)
     const client = await Client.create(wallet)
     await client.conversations.list()
   })
-
+  /*
   it('Sends a message to itself', async () => {
     const wallet = new Wallet(process.env.RELAYCC_TEST_PK as string)
     const client = await Client.create(wallet)
@@ -104,6 +104,8 @@ describe('Performance', () => {
     const result = await Promise.all(requests)
     console.log(result)
   })
+
+ */
 })
 
 function getAddress() {

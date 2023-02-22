@@ -1,6 +1,9 @@
-import type { Conversation } from './conversations/Conversation'
-import type Client from './Client'
-import { message as proto, content as protoContent } from '@xmtp/proto'
+import type { Conversation, ConversationExport } from './conversations'
+import {
+  message as proto,
+  content as protoContent,
+  ciphertext as cipherProto,
+} from '@xmtp/proto'
 import Long from 'long'
 import Ciphertext from './crypto/Ciphertext'
 import {
@@ -14,12 +17,15 @@ import {
 import { bytesToHex } from './crypto/utils'
 import { sha256 } from './crypto/encryption'
 import {
+  CodecRegistry,
   ContentTypeFallback,
   ContentTypeId,
   EncodedContent,
 } from './MessageContent'
 import { nsToDate } from './utils'
 import { decompress } from './Compression'
+import { deepEqual } from './utils/equals'
+import { parseObjectToUint8Array } from './utils/uint8Array'
 
 const headerBytesAndCiphertext = (
   msg: proto.Message
@@ -48,7 +54,7 @@ class MessageBase {
    * be used in determining uniqueness of messages.
    */
   id: string
-  private bytes: Uint8Array
+  protected bytes: Uint8Array
 
   constructor(id: string, bytes: Uint8Array, obj: proto.Message) {
     ;[this.headerBytes, this.ciphertext] = headerBytesAndCiphertext(obj)
@@ -79,6 +85,37 @@ export class MessageV1 extends MessageBase implements proto.MessageV1 {
     super(id, bytes, obj)
     this.senderAddress = senderAddress
     this.header = header
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static toJSON(msg: MessageV1): any {
+    return {
+      headerBytes: msg.headerBytes,
+      ciphertext: cipherProto.Ciphertext.toJSON(msg.ciphertext),
+      id: msg.id,
+      bytes: msg.bytes,
+      header: proto.MessageHeaderV1.toJSON(msg.header),
+      senderAddress: msg.senderAddress,
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static from(msg: MessageV1 | any): MessageV1 {
+    if (msg instanceof MessageV1) {
+      return msg
+    } else {
+      if (typeof msg.bytes === 'object') {
+        msg.bytes = parseObjectToUint8Array(msg.bytes)
+      }
+      const m = { v1: proto.MessageV1.fromJSON(msg), v2: undefined }
+      return new MessageV1(
+        msg.id,
+        msg.bytes,
+        m,
+        proto.MessageHeaderV1.fromJSON(msg.header),
+        msg.senderAddress
+      )
+    }
   }
 
   static async create(
@@ -221,6 +258,41 @@ export class MessageV2 extends MessageBase implements proto.MessageV2 {
     this.senderAddress = senderAddress
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static toJSON(msg: MessageV2): any {
+    return {
+      headerBytes: msg.headerBytes,
+      ciphertext: cipherProto.Ciphertext.toJSON(msg.ciphertext),
+      id: msg.id,
+      bytes: msg.bytes,
+      header: proto.MessageHeaderV2.toJSON(msg.header),
+      signed: msg.signed
+        ? protoContent.SignedContent.toJSON(msg.signed)
+        : undefined,
+      senderAddress: msg.senderAddress,
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static from(msg: MessageV2 | any): MessageV2 {
+    if (msg instanceof MessageV2) {
+      return msg
+    } else {
+      if (typeof msg.bytes === 'object') {
+        msg.bytes = parseObjectToUint8Array(msg.bytes)
+      }
+      const m = { v2: proto.MessageV2.fromJSON(msg), v1: undefined }
+      return new MessageV2(
+        msg.id,
+        msg.bytes,
+        m,
+        proto.MessageHeaderV2.fromJSON(msg.header),
+        protoContent.SignedContent.fromJSON(msg.signed),
+        msg.senderAddress
+      )
+    }
+  }
+
   static async create(
     obj: proto.Message,
     header: proto.MessageHeaderV2,
@@ -245,6 +317,19 @@ export class MessageV2 extends MessageBase implements proto.MessageV2 {
 
 export type Message = MessageV1 | MessageV2
 
+export interface DecodedMessageExport {
+  id: string
+  messageVersion: 'v1' | 'v2'
+  senderAddress: string
+  recipientAddress?: string
+  sent: Date
+  contentTopic: string
+  conversation: ConversationExport
+  contentType: ContentTypeId
+  content: any // eslint-disable-line @typescript-eslint/no-explicit-any
+  error?: Error
+}
+
 export class DecodedMessage {
   id: string
   messageVersion: 'v1' | 'v2'
@@ -268,7 +353,7 @@ export class DecodedMessage {
     content,
     sent,
     error,
-  }: DecodedMessage) {
+  }: Omit<DecodedMessage, 'export'>) {
     this.id = id
     this.messageVersion = messageVersion
     this.senderAddress = senderAddress
@@ -281,6 +366,21 @@ export class DecodedMessage {
     this.contentTopic = contentTopic
   }
 
+  export(): DecodedMessageExport {
+    return {
+      id: this.id,
+      messageVersion: this.messageVersion,
+      senderAddress: this.senderAddress,
+      recipientAddress: this.recipientAddress,
+      sent: this.sent,
+      contentTopic: this.contentTopic,
+      conversation: this.conversation.export(),
+      contentType: this.contentType,
+      content: this.content,
+      error: this.error,
+    }
+  }
+
   static fromV1Message(
     message: MessageV1,
     content: any, // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -289,11 +389,32 @@ export class DecodedMessage {
     conversation: Conversation,
     error?: Error
   ): DecodedMessage {
+    return DecodedMessage.fromExport(
+      DecodedMessage.exportFromV1Message(
+        message,
+        content,
+        contentType,
+        contentTopic,
+        conversation.export(),
+        error
+      ),
+      conversation
+    )
+  }
+
+  static exportFromV1Message(
+    message: MessageV1,
+    content: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    contentType: ContentTypeId,
+    contentTopic: string,
+    conversation: ConversationExport,
+    error?: Error
+  ): DecodedMessageExport {
     const { id, senderAddress, recipientAddress, sent } = message
     if (!senderAddress) {
       throw new Error('Sender address is required')
     }
-    return new DecodedMessage({
+    return {
       id,
       messageVersion: 'v1',
       senderAddress,
@@ -304,7 +425,7 @@ export class DecodedMessage {
       contentTopic,
       conversation,
       error,
-    })
+    } as DecodedMessageExport
   }
 
   static fromV2Message(
@@ -315,12 +436,33 @@ export class DecodedMessage {
     conversation: Conversation,
     error?: Error
   ): DecodedMessage {
+    return DecodedMessage.fromExport(
+      DecodedMessage.exportFromV2Message(
+        message,
+        content,
+        contentType,
+        contentTopic,
+        conversation.export(),
+        error
+      ),
+      conversation
+    )
+  }
+
+  static exportFromV2Message(
+    message: MessageV2,
+    content: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    contentType: ContentTypeId,
+    contentTopic: string,
+    conversation: ConversationExport,
+    error?: Error
+  ): DecodedMessageExport {
     const { id, senderAddress, sent } = message
     if (!senderAddress) {
       throw new Error('Sender address is required')
     }
 
-    return new DecodedMessage({
+    return {
       id,
       messageVersion: 'v2',
       senderAddress,
@@ -330,11 +472,27 @@ export class DecodedMessage {
       contentTopic,
       conversation,
       error,
+    } as DecodedMessageExport
+  }
+
+  static fromExport(
+    exported: DecodedMessageExport,
+    conversation: Conversation
+  ): DecodedMessage {
+    if (!deepEqual(conversation.export(), exported.conversation)) {
+      throw new Error('Conversation mismatch')
+    }
+    return new DecodedMessage({
+      ...exported,
+      conversation,
     })
   }
 }
 
-export async function decodeContent(contentBytes: Uint8Array, client: Client) {
+export async function decodeContent(
+  contentBytes: Uint8Array,
+  registry: CodecRegistry
+) {
   const encodedContent = protoContent.EncodedContent.decode(contentBytes)
 
   if (!encodedContent.type) {
@@ -347,9 +505,9 @@ export async function decodeContent(contentBytes: Uint8Array, client: Client) {
 
   await decompress(encodedContent, 1000)
 
-  const codec = client.codecFor(contentType)
+  const codec = registry.codecFor(contentType)
   if (codec) {
-    content = codec.decode(encodedContent as EncodedContent, client)
+    content = codec.decode(encodedContent as EncodedContent, registry)
   } else {
     error = new Error('unknown content type ' + contentType)
     if (encodedContent.fallback) {
